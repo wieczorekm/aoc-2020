@@ -1,187 +1,188 @@
 with open('day18.in') as f:
     lines = [line.rstrip() for line in f]
 
+
 import re
 
-import enum
-import re
+'''
+-> CONTEXT-FREE GRAMMAR <-
+expr     --> expr PLUS term      |  expr MINUS term    |  term
+term     --> term TIMES factor   |  term DIVIDE factor |  factor
+factor   --> exponent POW factor |  exponent
+exponent --> MINUS exponent      |  final
+final    --> DIGIT               |  ( expr )
+'''
+
+class Expression:
+
+    def __init__(self):
+        raise NotImplementedError()
+
+    def Evaluate(self):
+        raise NotImplementedError()
+
+    def __repr__(self):
+        klass = self.__class__.__name__
+        private = '_{0}__'.format(klass)
+        args = []
+        for name in self.__dict__:
+            if name.startswith(private):
+                value = self.__dict__[name]
+                name = name[len(private):]
+                args.append('{0}={1}'.format(name, repr(value)))
+        return '{0}({1})'.format(klass, ', '.join(args))
 
 
-class TokenType(enum.Enum):
-    T_NUM = 0
-    T_PLUS = 1
-    T_MINUS = 2
-    T_MULT = 3
-    T_DIV = 4
-    T_LPAR = 5
-    T_RPAR = 6
-    T_END = 7
+class Constant(Expression):
 
+    def __init__(self, value):
+        self.__value = value
 
-import operator
+    def Evaluate(self):
+        return self.__value
 
-operations = {
-    TokenType.T_PLUS: operator.add,
-    TokenType.T_MINUS: operator.sub,
-    TokenType.T_MULT: operator.mul,
-    TokenType.T_DIV: operator.truediv
-}
+class Operation(Expression):
 
-def compute(node):
-    if node.token_type == TokenType.T_NUM:
-        return node.value
-    left_result = compute(node.children[0])
-    right_result = compute(node.children[1])
-    operation = operations[node.token_type]
-    return operation(left_result, right_result)
+    def __init__(self, operation, left, right):
+        self.__op = operation
+        self.__left = left
+        self.__right = right
 
-class Node:
-    def __init__(self, token_type, value=None):
-        self.token_type = token_type
-        self.value = value
-        self.children = []
+    def Evaluate(self):
+        x = self.__left.Evaluate()
+        y = self.__right.Evaluate()
 
+        if self.__op == '+':
+            return x + y
+        if self.__op == '-':
+            return x - y
+        if self.__op == '*':
+            return x * y
+        if self.__op == '/':
+            return x / y
+        if self.__op == '^':
+            return pow(x, y)
+        raise Exception('Unknown operator: ' + self.__op)
 
-def lexical_analysis(s):
-    mappings = {
-        '*': TokenType.T_MULT,
-        '-': TokenType.T_MINUS,
-        '+': TokenType.T_PLUS,
-        '/': TokenType.T_DIV,
-        '(': TokenType.T_LPAR,
-        ')': TokenType.T_RPAR}
+class Parser:
 
-    tokens = []
-    for c in s:
-        if c in mappings:
-            token_type = mappings[c]
-            token = Node(token_type, value=c)
-        elif re.match(r'\d', c):
-            token = Node(TokenType.T_NUM, value=int(c))
+    def parse(self, tokens):
+        self.tokens = tokens
+        self.nextToken()
+        return self.expr()
+
+    def nextToken(self):
+        if len(self.tokens):
+            # remove first element from token list\
+            self.current = self.tokens.pop(0)
         else:
-            raise Exception('Invalid token: {}'.format(c))
-        tokens.append(token)
-    tokens.append(Node(TokenType.T_END))
-    return tokens
+            self.current = None
+
+    def expr(self):
+        result = self.term()
+        while self.current in ('*', '/'):
+            if self.current == '*':
+                self.nextToken()
+                factor = result
+                multiplier = self.term()
+                result = Operation('*', factor, multiplier)
+            if self.current == '/':
+                self.nextToken()
+                dividend = result
+                divisor = self.term()
+                result = Operation('/', dividend, divisor)
+        return result
+
+    def term(self):
+        result = self.factor()
+        while self.current in ('+', '-'):
+            if self.current == '+':
+                self.nextToken()
+                a = result
+                b = self.term()
+                result = Operation('+', a, b)
+            if self.current == '-':
+                self.nextToken()
+                minuend = result
+                subtrahend = self.term()
+                result = Operation('-', minuend, subtrahend)
+        return result
 
 
-def match(tokens, token):
-    if tokens[0].token_type == token:
-        return tokens.pop(0)
-    else:
-        raise_syntax_error(tokens)
+    def factor(self):
+        result = self.exponent()
+        while self.current == '^':
+            self.nextToken()
+            base = result
+            exp = self.factor()
+            result = Operation('^', base, exp)
+        return result
 
-
-def parse_e(tokens):
-    return parse_ea(tokens, parse_e2(tokens))
-
-
-def parse_ea(tokens, left_node):
-    if tokens[0].token_type in [TokenType.T_MULT, TokenType.T_DIV]:
-        node = tokens.pop(0)
-        node.children.append(left_node)
-        next_node = parse_e(tokens)
-
-        if next_node.token_type in [TokenType.T_MULT, TokenType.T_DIV]:
-            next_left_node = next_node.children[0]
-            node.children.append(next_left_node)
-            next_node.children[0] = node
-            return next_node
-
-        node.children.append(next_node)
-        return node
-    elif tokens[0].token_type in [TokenType.T_RPAR, TokenType.T_END]:
-        return left_node
-    raise_syntax_error(tokens)
-
-
-def parse_e2(tokens):
-    return parse_e2a(tokens, parse_e3(tokens))
-
-
-def parse_e2a(tokens, left_node):
-    if tokens[0].token_type in [TokenType.T_PLUS, TokenType.T_MINUS]:
-        node = tokens.pop(0)
-        node.children.append(left_node)
-        next_node = parse_e(tokens)
-
-        if next_node.token_type in [TokenType.T_PLUS, TokenType.T_MINUS]:
-            next_left_node = next_node.children[0]
-            node.children.append(next_left_node)
-            next_node.children[0] = node
-            return next_node
-
-        node.children.append(next_node)
-        return node
-    elif tokens[0].token_type in [TokenType.T_MULT, TokenType.T_DIV, TokenType.T_END, TokenType.T_RPAR]:
-        return left_node
-    raise_syntax_error(tokens)
-
-
-def parse_e3(tokens):
-    if tokens[0].token_type == TokenType.T_NUM:
-        return tokens.pop(0)
-    match(tokens, TokenType.T_LPAR)
-    e_node = parse_e(tokens)
-    match(tokens, TokenType.T_RPAR)
-    return e_node
-
-
-def raise_syntax_error(tokens):
-    raise Exception('Invalid syntax on token {}'.format(tokens[0].token_type))
-
-
-def parse(inputstring):
-    tokens = lexical_analysis(inputstring)
-    ast = parse_e(tokens)
-    match(tokens, TokenType.T_END)
-    return ast
-
-def parseX(l, startIdx=0):
-    print("entering parse with idx = {}", startIdx)
-    currIdx = startIdx
-    mode = ""
-
-    if l[currIdx] == '(':
-        r, i = parse(l, currIdx+1)
-        result = r
-        currIdx = i
-    else:
-        result = int(l[currIdx])
-        currIdx += 1
-
-    while currIdx < len(l):
-        print("")
-        print("current mode is ", mode)
-        print("working on", l[currIdx], currIdx)
-        if l[currIdx] == ')':
-            print("exiting parse with ) = {}", currIdx)
-            return result, currIdx+1
-        elif l[currIdx] == "+" or l[currIdx] == "*":
-            mode = l[currIdx]
-            print("changing mode to ", mode, currIdx)
+    def exponent(self):
+        if self.current == '-':
+            self.nextToken()
+            positive = self.final()
+            result = Constant(-positive.Evaluate())
         else:
-            if l[currIdx] == '(':
-                r, i = parse(l, currIdx+1)
-                curr = r
-                currIdx = i - 1
-            else:
-                curr = int(l[currIdx])
-            if mode == "+":
-                print("add ", result, curr, result+curr)
-                r, i = parse(l, currIdx+1)
-                curr = r
-                currIdx = i - 1
-                result += curr
-            elif mode == "*":
-                print("mul ", result, curr, result*curr)
-                result *= curr
-            else:
-                print(mode)
-                assert False
-        currIdx += 1
+            result = self.final()
+        return result
 
-    return result, currIdx
+    def final(self):
+        result = None
+        if type(self.current) is float:
+            result = Constant(self.current)
+            self.nextToken()
+        elif self.current == '(':
+            self.nextToken()
+            result = self.expr()
+            if self.current != ')':
+                raise Exception('Expected )')
+            self.nextToken()
+        else:
+            raise Exception('Expected number or (expr)')
+        return result
+
+class MathExp:
+
+    SYMBOLS = ['+', '-', '*', '/', '^', '(', ')']
+
+    def __init__(self):
+        self.parser = Parser()
+
+    def eval(self, string):
+        chars = list(string)
+        tokens = self.tokenizer(chars)
+        if not tokens:
+            # not parse if empty
+            return None
+        tree = self.parser.parse(tokens)
+        # print(tree)   # uncomment to see parser results
+        return tree.Evaluate()
+
+    def tokenizer(self, chars):
+        tokens = []
+        pos = 0
+        while pos < len(chars):
+            c = chars[pos]
+
+            if c == ' ':
+                # do nothing...
+                pass
+            elif c in self.SYMBOLS:
+                tokens.append(c)
+            elif c.isdigit():
+                num = float(c);
+                # read the entire number before append
+                while pos + 1 < len(chars) and chars[pos + 1].isdigit():
+                    pos += 1
+                    num = num * 10 + float(chars[pos])
+                tokens.append(num)
+            else:
+                raise Exception('Unknown symbol at position: ' + str(pos))
+
+            pos += 1
+        return tokens
+
 
 s = 0
 #((2 + 4 * 9) * (6 + 9 * 8 + 6) + 6) + 2 + 4 * 2
@@ -190,9 +191,8 @@ for l in lines:
     r = re.findall(r'\d+|\(|\)|\*|\+', l1)
     #l2 = l1.replace("+", "X").replace("*", "+").replace("X", "*")
     #print(l2)
-    parsed = parse(l1)
-    print(parsed.value)
-    x = compute(parsed)
+    me = MathExp()
+    x = me.eval(l1)
     print(x)
     s+=x
 
